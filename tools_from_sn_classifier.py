@@ -8,8 +8,8 @@ Created on Wed May 17 15:17:45 2023
 import pandas as pd
 import numpy as np
 from fink_sn_AL_classifier.actsnfink import classifier_sigmoid
+from fink_sn_AL_classifier.actsnfink import sigmoid
 from fink_sn_AL_classifier.actsnfink.early_sn_classifier import mag2fluxcal_snana
-import fit_Lightcurve as fit_lc
 import matplotlib.pyplot as plt
 
 # This contains tools exracted from the early sn classifier github, addapted for our use
@@ -174,9 +174,9 @@ def featurize_full_dataset(lc: pd.DataFrame, screen=False):
 
 					x = np.linspace(t0 - tmax - 20, tmax - t0 + 30, num = 200)
 
-					sigmoid = fit_lc.sigmoid_profile(x, a[filt], b[filt], c[filt])
+					sigmoid_fit = sigmoid.fsigmoid(x, a[filt], b[filt], c[filt])
 
-					plt.plot(x, sigmoid, c = color)
+					plt.plot(x, sigmoid_fit, c = color)
 					plt.errorbar(masked_lc['MJD'] - t0 , masked_lc['FLUXCAL'], fmt = '.', elinewidth=0.5,
 								  yerr = masked_lc['FLUXCALERR'], label = filt, c = color)
 					plt.legend()

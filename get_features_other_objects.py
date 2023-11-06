@@ -32,7 +32,6 @@ def load_data_other_objects(data_origin = 'all'):
 
 	logging.info('Loading parquet files')
 	all_obj_df = pd.concat([pd.read_parquet(parquet_fname) for parquet_fname in all_parquet_fnames])
-	#all_obj_df.sort_values(['objectId', 'cjd'])
 
 	# Keep only row with all alerts
 	all_obj_df['length'] = all_obj_df['cjd'].apply(lambda x: len(x))
@@ -69,11 +68,9 @@ def crop_lc_to_rising_time(lc_values, days_to_crop_before = 200):
 
 	"""
 	tmax_idx = np.nanargmax(lc_values[1])
-	tmin_idx = np.argmax(lc_values[0] >=  lc_values[0][tmax_idx] - days_to_crop_before)
+	tmin_idx = np.argmax(lc_values[0] >= lc_values[0][tmax_idx] - days_to_crop_before)
 	# Mask from minimum to maximum
 	lc_values = lc_values[:, tmin_idx:tmax_idx + 1]
-
-
 
 	return lc_values
 
@@ -116,10 +113,11 @@ def plot_lightcurve_and_fit(lc_values, filt_list, values_fit, err_fit, ztf_name 
 		plt.errorbar(t, f, yerr=ferr, fmt='o', alpha=.7, color=colors[idx])
 		plt.plot(X, rainbow, linewidth=5, label=i, color=colors[idx])
 		# Error plots
-		generated_parameters = np.random.multivariate_normal(values_fit[:-1], np.diag(err_fit)**2,1000)
-		generated_lightcurves = np.array([feature.model(X, i, generated_values) for generated_values in generated_parameters])
+		generated_params = np.random.multivariate_normal(values_fit[:-1], np.diag(err_fit)**2, 1000)
+		generated_lightcurves = np.array([feature.model(X, i, generated_values)
+											for generated_values in generated_params])
 		generated_envelope = np.nanpercentile(generated_lightcurves, [16, 84], axis=0)
-		plt.fill_between(X, generated_envelope[0], generated_envelope[1],alpha=0.2,color=colors[idx])
+		plt.fill_between(X, generated_envelope[0], generated_envelope[1], alpha=0.2, color=colors[idx])
 
 		plt.title(ztf_name)
 
@@ -130,6 +128,9 @@ def extract_features_for_an_object(row_obj, feature, filt_conv, min_nb_points_fi
 	name = row_obj.objectId
 	trans_type = row_obj.type
 	lc_values = np.stack(row_obj[['cjd', 'cmagpsf', 'csigmapsf', 'cfid']])
+	# TODO: I could use from here for the other dataframe format if I put
+	# lc_values = row_obj[['jd', 'magpsf', 'sigmapsf', 'fid']].values.T
+	# row_obj is row_obj = df[df.objectId == 'ZTF18aahqkbt'] within for loop...
 	# Remove alerts with nan values
 	lc_values = lc_values[:, ~np.isnan(lc_values).any(axis=0)]
 	# Flux conversion

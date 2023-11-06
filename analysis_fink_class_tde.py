@@ -43,7 +43,7 @@ for objectId in fink_df.objectId.unique():
 		for filt, filt_str in zip([1, 2], ['g', 'r']):
 			df_obj_filt = df_obj[df_obj.fid == filt]
 			ax_new.errorbar(df_obj_filt.jd, df_obj_filt.magpsf, yerr = df_obj_filt.sigmapsf,
-					  label = 'LC (flux), FLT: ' + filt_str, lw = 1, fmt = '.', marker = '+')
+					  label = 'LC (flux), FLT: ' + filt_str, fmt= '+')
 		ax_new.set_ylabel('MAgnitude')
 		ax.legend(loc='upper left')
 		ax_new.legend(loc='upper right')

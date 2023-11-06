@@ -62,7 +62,7 @@ def load_forced_photometry_data(fink_df, quality_cuts = True, SNT_thresh = 3):
 	forced_phot_data = glob.glob('ZTF_TDE_Data/forced_photometry/batchfp_*.txt')
 	list_of_dfs = []
 	for forced_phot_fname in forced_phot_data:
-		obj_id = find_objectId_for_forced_phot_data(forced_phot_fname, fink_df)
+		obj_id = find_objectId_for_fp_data_xmatch_fink(forced_phot_fname, fink_df)
 		df_fp = pd.read_csv(forced_phot_fname, comment = '#', sep = ' ')
 		df_fp.columns = df_fp.columns.str.strip(',')  # strip prefix
 		df_fp['objectId'] = obj_id
@@ -76,28 +76,8 @@ def load_forced_photometry_data(fink_df, quality_cuts = True, SNT_thresh = 3):
 	if quality_cuts:
 		all_objects_df = all_objects_df[(all_objects_df['infobitssci'] == 0)
 		& (all_objects_df['forcediffimflux'] / all_objects_df['forcediffimfluxunc'] > SNT_thresh)]
-	# all_objects_df = all_objects_df[all_objects_df['forcediffimflux'] > (-1000)]
 
 	return all_objects_df
-
-
-def diff_phot(forcediffimflux, forcediffimfluxunc, zpdiff, SNT=3, SNU=5, set_to_nan=True):
-	"""
-	Get magpsf and sigmapsf from forced photometry parameters. Function provided by Julien.
-	"""
-	if (forcediffimflux / forcediffimfluxunc) > SNT:
-		# we have a confident detection, compute and plot mag with error bar:
-		mag = zpdiff - 2.5 * np.log10(forcediffimflux)
-		err = 1.0857 * forcediffimfluxunc / forcediffimflux
-	else:
-		# compute flux upper limit and plot as arrow:
-		if not set_to_nan:
-			mag = zpdiff - 2.5 * np.log10(SNU * forcediffimfluxunc)
-		else:
-			mag = np.nan
-		err = np.nan
-
-	return mag, err
 
 
 def merge_features_tdes_SN(csv_tdes, csv_other, out_csv):
@@ -139,6 +119,7 @@ def crop_lc_to_rising_part(converted_df: pd.DataFrame, minimum_nb_obs: int = 4, 
 	----------
 	converted_df : pd.DataFrame
 		Dataset with columns ['objectId', 'type', 'MJD', 'FLT','FLUXCAL', 'FLUXCALERR'].
+		Each row is an alert.
 	minimum_nb_obs : int, optional
 		Minimum number of observations (otherwise drop alerts of object). The default is 3.
 	save_csv : bool, optional
@@ -158,9 +139,6 @@ def crop_lc_to_rising_part(converted_df: pd.DataFrame, minimum_nb_obs: int = 4, 
 		obj_flag = converted_df['id'].values == name
 		obj_df = converted_df[obj_flag]
 		tmax = 0
-		if name == '643489380015010000':
-			obj_df.drop(obj_df['FLUXCAL'].idxmax(), inplace = True)
-
 		for filt in ['g', 'r']:
 			filt_df = obj_df[obj_df['FLT'] == filt].copy()
 			if len(filt_df) > 0:
@@ -179,28 +157,13 @@ def crop_lc_to_rising_part(converted_df: pd.DataFrame, minimum_nb_obs: int = 4, 
 	return converted_df_early
 
 
-def crop_lc_based_on_csv_values(df):
-
-
-	# Hard-code csv filename and read
-	csv_fname = 'ZTF_TDE_Data/forced_photometry/TimeParametersTDEs_training.csv'
-	times_csv = pd.read_csv(csv_fname)
-
-	# Crossmatch csvs and cut LCs
-	merged_csv = df.merge(times_csv, left_on = 'fp_fname', right_on = 'Filename')
-
-	converted_df_early = df[(merged_csv.MJD >= merged_csv['Start (MJD)'] + 2400000.5)
-						  & (merged_csv.MJD <= merged_csv['Peak (MJD)'] + 2400000.5)]
-	return converted_df_early
-
-
 def is_unique(s):
 	""" Check if all values of a (pandas) series are equal. """
 	a = s.to_numpy()
 	return (a[0] == a).all()
 
 
-def find_objectId_for_forced_phot_data(forced_phot_fname, df_fink, deg_tolerance = 0.001):
+def find_objectId_for_fp_data_xmatch_fink(forced_phot_fname, df_fink, deg_tolerance = 0.001):
 	"""
 	Correlate the forced photometry data with the Fink data, to find the object ID corresponding
 	to the forced-photometry data file.
@@ -249,6 +212,49 @@ def find_objectId_for_forced_phot_data(forced_phot_fname, df_fink, deg_tolerance
 	return obj_id
 
 
+def find_objectId_for_fp_data_from_fink_resolver(forced_phot_fname):
+	"""
+	Find the object ID corresponding to the forced-photometry data file, using the Fink resolver
+	with position.
+
+	Parameters
+	----------
+	forced_phot_fname : str
+		filename containing the forced_phot data of one object.
+
+	Returns
+	-------
+	obj_id : str
+		Object Identifier.
+
+	"""
+	with open(forced_phot_fname) as f:
+		for i, line in enumerate(f):
+			if i == 3:
+				req_ra = float(line.split(' ')[-2])
+			elif i ==4:
+				req_dec = float(line.split(' ')[-2])
+			elif i > 4:
+				break
+
+	FINK_API_URL = 'https://fink-portal.org'
+
+	# Call fink conesearch
+	r = requests.post('{}/api/v1/explorer'.format(FINK_API_URL),
+				   json={'ra': req_ra, 'dec': req_dec, 'radius': 5.0, 'columns': 'i:objectId'})
+
+	if r.json() == []:
+	    logging.warning('Unable to cross-correlate object from file ' + forced_phot_fname
+					 + 'with Fink data. No counterpart in Fink.')
+	    return forced_phot_fname
+
+	objectId = r.json()[0]['i:objectId']
+
+	r = requests.post('{}/api/v1/resolver'.format(FINK_API_URL),
+				   json={'resolver': 'tns', 'name': objectId, 'reverse': True})
+	return r.json()
+
+
 def convert_forced_phot_df(df):
 
 	df.rename(columns = { 'objectId' : 'id',
@@ -282,6 +288,22 @@ def convert_df(fink_df, data_origin = 'fink'):
 
 
 def extract_rainbow_feat(df_to_extract, show_plots = True):
+	"""
+	Preliminary function to extract rainbow features on the Dataframe.
+
+	Parameters
+	----------
+	df_to_extract : TYPE
+		DESCRIPTION.
+	show_plots : TYPE, optional
+		DESCRIPTION. The default is True.
+
+	Returns
+	-------
+	feature_matrix : TYPE
+		DESCRIPTION.
+
+	"""
 
 	columns = ['id', 'type', 'reference_time', 'amplitude', 'rise_time', 'temperature', 'r_chisq',
 					'err_reference_time', 'err_amplitude', 'err_rise_time', 'err_temperature']
@@ -357,65 +379,6 @@ def extract_rainbow_feat(df_to_extract, show_plots = True):
 	return feature_matrix
 
 
-	columns = ['id', 'type', 'reference_time', 'amplitude', 'rise_time', 'temperature',
-					'err_reference_time', 'err_amplitude', 'err_rise_time', 'err_temperature']
-	# Effective wavelengths in Angstrom
-	band_wave_aa = {"g": 4770.0, "r": 6231.0, "i": 7625.0}
-	features_all = []
-	for indx in range(np.unique(df_to_extract['id'].values).shape[0]):
-		print('\r Objects processed: {}'.format(indx + 1), end='\r')
-
-		ztf_name = np.unique(df_to_extract['id'].values)[indx]
-		obj_flag = df_to_extract['id'].values == ztf_name
-		obj_df = df_to_extract[obj_flag].copy()
-		sntype = df_to_extract[obj_flag].iloc[0]['type']
-		fp_fname = df_to_extract[obj_flag].fp_fname.iloc[0]
-		obj_df.sort_values('MJD', inplace = True)
-
-		line = [ztf_name, sntype]
-
-		flux = obj_df['FLUXCAL']
-		fluxerr = obj_df['FLUXCALERR']
-		band = obj_df['FLT']
-		norm = flux[band == 'r'].max()
-		flux, fluxerr = flux / norm, fluxerr / norm
-		mjd = obj_df['MJD']
-
-		feature = RainbowFit.from_angstrom(band_wave_aa, with_baseline=False)
-		values, errors = feature(mjd, flux, sigma=fluxerr, band=band)
-		features = values[:-1]
-		line.extend((list(features) + list(errors)))
-
-		features_all.append(line)
-
-		if show_plots:
-			X = np.linspace(mjd.min(), mjd.max() + 20, 500)
-
-			plt.figure(figsize=(12, 8))
-
-			colors = ['green', 'red', 'black']
-			for idx, i in enumerate(["g", "r", "i"]):
-				mask = band == i
-				f = flux[mask]
-				ferr = fluxerr[mask]
-				t = mjd[mask]
-				rainbow = feature.model(X, i, values)
-				plt.errorbar(t, f, yerr=ferr, fmt='o', alpha=.7, color=colors[idx])
-				plt.plot(X, rainbow, linewidth=5, label=i, color=colors[idx])
-
-				generated_parameters = np.random.multivariate_normal(features, np.diag(errors)**2,1000)
-				generated_lightcurves = np.array([feature.model(X, i, generated_values) for generated_values in generated_parameters])
-				generated_envelope = np.nanpercentile(generated_lightcurves, [16,84], axis=0)
-				plt.fill_between(X, generated_envelope[0], generated_envelope[1],alpha=0.2,color=colors[idx])
-
-				plt.title('{}, {}'.format(ztf_name, fp_fname))
-
-
-			plt.legend()
-
-	feature_matrix = pd.DataFrame(features_all, columns=columns)
-	return feature_matrix
-
 def generate_features_tdes(data_origin = 'forced_phot', feat_extractor = 'rainbow',
 						   overwrite_fink_df = False, show_plots = False):
 
@@ -447,32 +410,6 @@ def generate_features_tdes(data_origin = 'forced_phot', feat_extractor = 'rainbo
 							   'Features_check/merged_features.csv')
 
 
-def load_data_other_objects():
-
-	# TODO: Create config file and put paths there
-	path_parquet_files = '/home/lmiguel/Data/TDE_classification/AL_data/'
-	all_parquet_fnames = glob.glob(os.path.join(path_parquet_files, '*tns*.parquet'))
-
-	logging.info('Loading parquet files')
-	all_obj_df = pd.concat([pd.read_parquet(parquet_fname) for parquet_fname in all_parquet_fnames])
-	#all_obj_df.sort_values(['objectId', 'cjd'])
-
-	# Remove duplicate values
-	for col in ['cjd', 'cmagpsf', 'csigmapsf', 'cfid']:
-
-		all_obj_df[col.lstrip('c')] = all_obj_df[col].apply(lambda row: row[-1])
-		all_obj_df.drop(columns = col, inplace = True)
-
-	all_obj_df = all_obj_df[all_obj_df.objectId.isin(all_obj_df.objectId.unique())].copy()
-	logging.info('All files loaded')
-
-	return all_obj_df
-
-
-
-
-
-
 if __name__ == '__main__':
 
 	data_origin = 'forced_phot'
@@ -480,15 +417,4 @@ if __name__ == '__main__':
 	feat_extractor = 'rainbow'
 
 	# Get features TDEs
-	generate_features_tdes(data_origin, feat_extractor, overwrite_fink_df = False, show_plots = False)
-
-# 	# Get features others
-# 	all_obj_df = load_data_other_objects()
-# 	converted_df = sn_tools.convert_full_dataset(all_obj_df, obj_id_header='objectId')
-# 	converted_df.dropna(subset = ['FLUXCALERR', 'FLUXCAL'], inplace = True)
-# 	converted_df_early = crop_lc_to_rising_part(converted_df)
-# 	converted_df_early.drop_duplicates(inplace = True)
-
-
-# 	features = extract_rainbow_feat(converted_df_early, show_plots = True)
-# 	features.to_csv('Features_check/features_rainbow_nontdes.csv', index = False)
+	generate_features_tdes(data_origin, feat_extractor, overwrite_fink_df = False, show_plots = True)
