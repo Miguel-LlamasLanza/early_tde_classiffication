@@ -418,3 +418,4 @@ if __name__ == '__main__':
 
 	# Get features TDEs
 	generate_features_tdes(data_origin, feat_extractor, overwrite_fink_df = False, show_plots = True)
+	plt.show()
